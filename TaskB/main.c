@@ -11,6 +11,8 @@ struct buffer {
     size_t capacity;
 };
 
+struct StackNode;
+
 char *prepareDataForPostfixNotation(char *);
 
 char *calculate(char *);
@@ -19,20 +21,19 @@ char *addCharacter(struct buffer *, const char);
 
 char *scan();
 
-char *addition(char *operate, char *r_operate);
-
-char *multiply(char *operate, char *r_operate);
-
-char *subtraction(char *l_operate, char *r_operate);
-
 int convertToArray(char *str, long long *);
 
 int getDigitCount(long long sum);
 
 char *doOperate(char *l_operate, char *r_operate, char operate);
 
+int countSubstring(const char *str, const char *sub);
+
+void clear(struct StackNode **head);
+
 int main() {
 
+    //TODO обработать все null от malloc
     char *expression = scan();
     if (!expression) {
         printf("%s", "[error]");
@@ -43,18 +44,17 @@ int main() {
     free(expression);
 
     if (!postfixExpression) {
-        return 0;
-    }
-    if (strcmp(postfixExpression, "[error]") == 0) {
         printf("%s", "[error]");
         return 0;
     }
+
     char *result = calculate(postfixExpression);
-    if (strcmp(result, "[error]") == 0) {
+    free(postfixExpression);
+
+    if (!result) {
         printf("%s", "[error]");
         return 0;
     }
-    free(postfixExpression);
 
     printf("%s", result);
     free(result);
@@ -69,27 +69,49 @@ struct StackNode {
 
 struct StackNode *newNode(const char *elem) {
     struct StackNode *node = (struct StackNode *) malloc(sizeof(struct StackNode));
+    if (!node)
+        return NULL;
+
     node->next = NULL;
     node->data = (char *) malloc(strlen(elem) + 1);
+    if (!node->data) {
+        free(node);
+        return NULL;
+    }
     strcpy(node->data, elem);
     return node;
 }
 
-void push(struct StackNode **head, char *elem) {
+
+char *push(struct StackNode **head, char *elem) {
     struct StackNode *stackNode = newNode(elem);
+    if (!stackNode)
+        return NULL;
+
     stackNode->next = *head;
     *head = stackNode;
+
+    return (*head)->data;
 }
 
-void pushOneSymbol(struct StackNode **head, char elem) {
+char *pushOneSymbol(struct StackNode **head, char elem) {
     char *symbolWithNullTerm = (char *) malloc(2);
+    if (!symbolWithNullTerm)
+        return NULL;
+
     symbolWithNullTerm[0] = elem;
     symbolWithNullTerm[1] = '\0';
 
     struct StackNode *stackNode = newNode(symbolWithNullTerm);
+    if (!stackNode) {
+        free(symbolWithNullTerm);
+        return NULL;
+    }
     stackNode->next = *head;
     *head = stackNode;
     free(symbolWithNullTerm);
+
+    return (*head)->data;
 }
 
 int isEmpty(struct StackNode **head) {
@@ -102,19 +124,17 @@ char *pop(struct StackNode **head) {
     }
     struct StackNode *tmp = *head;
     *head = (*head)->next;
-    char *data = (char *) malloc(strlen(tmp->data) + 1);
-    strcpy(data, tmp->data);
+    char *data = (char *) malloc(strlen(tmp->data)+1);
+
+    if (!data)
+        return NULL;
+
+    strncpy(data, tmp->data, strlen(tmp->data)+1);
     free(tmp->data);
     free(tmp);
+
     return data;
 }
-
-void clear(struct StackNode **head){
-    while(!isEmpty(head)){
-        free(pop(head));
-    }
-}
-
 
 const char *peek(struct StackNode **head) {
     if (isEmpty(head)) {
@@ -123,15 +143,19 @@ const char *peek(struct StackNode **head) {
     return (*head)->data;
 }
 
+
 //-------------------------------------</STACK>----------------------------------------//
 
 
 //-------------------------------------<STRING>----------------------------------------//
 
-void concat(struct buffer *str, const char *src) {
+char* concat(struct buffer *buf, const char *src) {
     for (int i = 0; i < strlen(src); i++) {
-        addCharacter(str, src[i]);
+        char *result = addCharacter(buf, src[i]);
+        if (!result)
+            return NULL;
     }
+    return buf->string;
 }
 
 //-------------------------------------</STRING>---------------------------------------//
@@ -160,9 +184,10 @@ char *addCharacter(struct buffer *buf, const char character) {
 char *scan() {
     struct buffer buf = {NULL, 0, 0};
     char character = 0;
-    while ((character = (char) fgetc(stdin)) && character !=EOF) {
-        if (character != ' ' && character!='\n') {
-            addCharacter(&buf, character);
+    while ((character = (char) fgetc(stdin)) && character != EOF) {
+        if (character != ' ' && character != '\n') {
+            //TODO if addCharacter return NULL;
+            if (!addCharacter(&buf, character)) return NULL;
         }
     }
     return buf.string;
@@ -188,6 +213,10 @@ char *prepareDataForPostfixNotation(char *expression) {
     char *postfixExpression = NULL;
 
     postfixExpression = (char *) malloc(strlen(expression) + 1);
+    if (!postfixExpression) {
+        return NULL;
+    }
+
     int bracketIsOpen = 0;
     size_t index = 0;
 
@@ -195,18 +224,33 @@ char *prepareDataForPostfixNotation(char *expression) {
         char character = expression[i];
 
         if (character == '+' || character == '-' || character == '*') {
-            if(bracketIsOpen) break;
+            if (bracketIsOpen) break;
 
             if (isEmpty(&operands)) {
-                pushOneSymbol(&operands, character);
+                char *result = pushOneSymbol(&operands, character);
+                if (!result) {
+                    free(postfixExpression);
+                    clear(&operands);
+                    return NULL;
+                }
             } else {
                 //извлекаем последний операнд из стека и сравниваем его приоритетность с текущим
                 while (!isEmpty(&operands) && operandPriority(character) <= operandPriority(peek(&operands)[0])) {
                     char *last_character = pop(&operands);
+                    if (!last_character) {
+                        free(postfixExpression);
+                        clear(&operands);
+                        return NULL;
+                    }
                     postfixExpression[index++] = last_character[0];
                     free(last_character);
                 }
-                pushOneSymbol(&operands, character);
+                char *result = pushOneSymbol(&operands, character);
+                if (!result) {
+                    free(postfixExpression);
+                    clear(&operands);
+                    return NULL;
+                }
             }
         } else if (character == '{' || character == '}') {
             postfixExpression[index] = character;
@@ -215,9 +259,9 @@ char *prepareDataForPostfixNotation(char *expression) {
             }
             if (character == '}') {
                 bracketIsOpen = 0;
-                if(postfixExpression[index-1]=='{'){
+                if (postfixExpression[index - 1] == '{') {
                     free(postfixExpression);
-                    return "[error]";
+                    return NULL;
                 }
             }
             index++;
@@ -229,30 +273,46 @@ char *prepareDataForPostfixNotation(char *expression) {
             postfixExpression[index++] = character;
 
         } else if (character == '(') {
-            pushOneSymbol(&operands, character);
+            char *result = pushOneSymbol(&operands, character);
+            if (!result) {
+                free(postfixExpression);
+                clear(&operands);
+                return NULL;
+            }
 
         } else if (character == ')') {
             char *operand;
-            while (!isEmpty(&operands) && (operand = pop(&operands))[0] != ')' && operand[0] != '(') {
+            while (!isEmpty(&operands) && (operand = pop(&operands))[0] != ')' && operand && operand[0] != '(') {
                 postfixExpression[index++] = operand[0];
                 free(operand);
+            }
+            if (!operand) {
+                free(postfixExpression);
+                clear(&operands);
+                return NULL;
             }
             free(operand);
 
         } else { //Если был введен некорректный символ
             free(postfixExpression);
             clear(&operands);
-            return "[error]";
+            return NULL;
         }
     }
 
-    if(bracketIsOpen){ //незаконченный вектор
+    if (bracketIsOpen) { //незаконченный вектор
         free(postfixExpression);
-        return "[error]";
+        clear(&operands);
+        return NULL;
     }
 
     while (!isEmpty(&operands)) {
         char *operand = pop(&operands);
+        if (!operand) {
+            free(postfixExpression);
+            clear(&operands);
+            return NULL;
+        }
         postfixExpression[index++] = operand[0];
         free(operand);
     }
@@ -262,6 +322,7 @@ char *prepareDataForPostfixNotation(char *expression) {
 
 char *calculate(char *postfixExpression) {
     struct StackNode *operates = NULL;
+
     for (int i = 0; i < strlen(postfixExpression); i++) {
         char character = postfixExpression[i];
         if (character >= '0' && character <= '9') {
@@ -274,71 +335,93 @@ char *calculate(char *postfixExpression) {
             size_t count = i - number_start + 1;
 
             number = (char *) malloc(count + 1);
+            if (!number) {
+                clear(&operates);
+                return NULL;
+            }
             strncpy(number, postfixExpression + number_start, count);
             number[count] = '\0';
 
-            push(&operates, number);
+            char *result = push(&operates, number);
             free(number);
+            if (!result) {
+                clear(&operates);
+                return NULL;
+            }
 
         } else if (character == '{') {
             struct buffer vector = {NULL, 0, 0};
             char vector_char = 0;
 
             while ((vector_char = postfixExpression[i]) != '}') {
-                addCharacter(&vector, vector_char);
+                if (!addCharacter(&vector, vector_char)) {
+                    clear(&operates);
+                    free(vector.string);
+                    return NULL;
+                }
                 i++;
             }
-            addCharacter(&vector, vector_char);
 
-            push(&operates, vector.string);
+            if (!addCharacter(&vector, vector_char)) {
+                clear(&operates);
+                free(vector.string);
+                return NULL;
+            }
+
+            if (!push(&operates, vector.string)) {
+                clear(&operates);
+                free(vector.string);
+                return NULL;
+            };
             free(vector.string);
 
         } else if (character == '+' || character == '-' || character == '*') {
             char *operate2 = pop(&operates);
-            char *operate1 = pop(&operates);
-
-            if (!operate1 || !operate2) {
-                free((void *) postfixExpression);
-                return "[error]";
+            if(!operate2){
+                clear(&operates);
+                return NULL;
             }
+            char *operate1 = pop(&operates);
+            if(!operate1){
+                free(operate2);
+                clear(&operates);
+                return NULL;
+            }
+
             char *result = NULL;
 
             switch (character) {
-                case '+': {
+                case '+': { //only {1,...,1}+{1,1,...,1}
                     if (strstr(operate1, "{") != NULL && strstr(operate2, "{") != NULL) {
                         result = doOperate(operate1, operate2, '+');
-                    } else result="[error]";
+                    }
                     break;
                 }
-                case '-': {
+                case '-': { //only {1,...,1}-{1,1,...,1}
                     if (strstr(operate1, "{") != NULL && strstr(operate2, "{") != NULL) {
                         result = doOperate(operate1, operate2, '-');
-                    } else result="[error]";
+                    }
                     break;
                 }
                 case '*': { //only {1,2,3}*3 or 3*{1,2,3}
                     if ((strstr(operate1, "{") == NULL) ^ (strstr(operate2, "{") == NULL)) {
                         result = doOperate(operate1, operate2, '*');
-                    } else result="[error]";
+                    }
                     break;
                 }
             }
 
-            if(strcmp(result,"[error]")==0){
+            if (!result) {
                 clear(&operates);
                 free(operate1);
                 free(operate2);
-                free((void *) postfixExpression);
-                return result;
+                return NULL;
             }
 
-            if (result) {
-                push(&operates, result);
-                free(result);
-            }
+            push(&operates, result);
+            free(result);
             free(operate1);
             free(operate2);
-
         }
     }
     return pop(&operates);
@@ -352,7 +435,11 @@ int convertToArray(char *str, long long *vector) {
     str++;         //пропускаем первую скобку '{'
     while ((token = __strtok_r(str, delim, &str))) {
         if (size % capacity == 0 && size != 0) {
-            vector = (long long *) realloc(vector, capacity * 2 * sizeof(long long));
+            long long* tmp = (long long *) realloc(vector, capacity * 2 * sizeof(long long));
+            if(!tmp){
+                free(vector);
+                return -1;
+            }
         }
         vector[size] = (long long) strtol(token, NULL, 10);
         size++;
@@ -361,8 +448,7 @@ int convertToArray(char *str, long long *vector) {
 }
 
 // returns count of non-overlapping occurrences of 'sub' in 'str'
-int countSubstring(const char *str, const char *sub)
-{
+int countSubstring(const char *str, const char *sub) {
     size_t length = strlen(sub);
     if (length == 0) return 0;
     int count = 0;
@@ -403,31 +489,51 @@ char *doOperate(char *l_operate, char *r_operate, char operate) {
             coeff = atoi(l_operate);
             vector_str = r_operate;
         }
-        size=countSubstring(vector_str,",")+1;
-        vector=(long long*)calloc((size_t) size, sizeof(long long));
-        convertToArray(vector_str, vector);
+        size = countSubstring(vector_str, ",") + 1;
+        vector = (long long *) calloc((size_t) size, sizeof(long long));
+        if(!vector){
+            return NULL;
+        }
+        if(convertToArray(vector_str, vector)==-1){
+            free(vector);
+            return NULL;
+        };
 
     } else {
 
-        size1=countSubstring(l_operate,",")+1;
-        size2=countSubstring(r_operate,",")+1;
-        size=size2>size1?size2:size1;
+        size1 = countSubstring(l_operate, ",") + 1;
+        size2 = countSubstring(r_operate, ",") + 1;
+        size = size2 > size1 ? size2 : size1;
 
-        vector1=(long long*)calloc((size_t) size, sizeof(long long));
-        vector2=(long long*)calloc((size_t) size, sizeof(long long));
+        vector1 = (long long *) calloc((size_t) size, sizeof(long long));
+        if(!vector1)
+            return NULL;
 
-        convertToArray(l_operate, vector1);
-        convertToArray(r_operate, vector2);
+        vector2 = (long long *) calloc((size_t) size, sizeof(long long));
+        if(!vector2){
+            free(vector1);
+            return NULL;
+        }
 
+        if(convertToArray(l_operate, vector1)==-1|| convertToArray(r_operate, vector2)==-1){
+            free(vector1);
+            free(vector2);
+            return NULL;
+        }
     }
 
-    char *format = NULL;
+    char* format = NULL;
     struct buffer result = {NULL, 0, 0};
     char *number = NULL;
     int digitCount = 0;
     long long res = 0;
 
-    addCharacter(&result, '{');
+    if(!addCharacter(&result, '{')){
+        if(vector) free(vector);
+        if(vector1) free(vector1);
+        if(vector2) free(vector2);
+        return NULL;
+    }
     for (int i = 0; i < size; i++) {
         format = (i == 0 ? "%llu" : ",%llu");
 
@@ -452,15 +558,39 @@ char *doOperate(char *l_operate, char *r_operate, char operate) {
 
         if (i != 0) digitCount++;
         number = (char *) malloc((digitCount + 1) * sizeof(char));
+        if(!number){
+            if(vector) free(vector);
+            if(vector1) free(vector1);
+            if(vector2) free(vector2);
+            return NULL;
+        }
         sprintf(number, format, res);
-        concat(&result, number);
+        if(!concat(&result, number)){
+            if(vector) free(vector);
+            if(vector1) free(vector1);
+            if(vector2) free(vector2);
+            free(number);
+            return NULL;
+        }
         free(number);
     }
-    addCharacter(&result, '}');
+    if(!addCharacter(&result, '}')){
+        if(vector) free(vector);
+        if(vector1) free(vector1);
+        if(vector2) free(vector2);
+        return NULL;
+    }
 
     if (vector) free(vector);
     if (vector1) free(vector1);
     if (vector2) free(vector2);
     return result.string;
 
+}
+
+void clear(struct StackNode **head) {
+    while (!isEmpty(head)) {
+        char* result=pop(head);
+        free(result);
+    }
 }
